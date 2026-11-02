@@ -96,6 +96,21 @@
   .perks li + li { border-top: 1px solid var(--bg2); }
   .perks .e { font-size: 20px; width: 24px; text-align: center; }
 
+  .gifts-intro { color: var(--hint); font-size: 13px; margin: -2px 4px 10px; }
+  .gifts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .gift {
+    background: var(--card); border-radius: var(--radius);
+    padding: 14px 12px 12px; display: flex; flex-direction: column; text-align: center;
+  }
+  .gift .emoji { font-size: 38px; line-height: 1.1; }
+  .gift .gname { font-weight: 700; margin-top: 6px; }
+  .gift .gdesc { color: var(--hint); font-size: 12px; margin: 4px 0 10px; flex: 1; }
+  .gift .buy { padding: 8px 10px; width: 100%; }
+  .gift.wide { grid-column: span 2; flex-direction: row; text-align: left; align-items: center; gap: 12px; }
+  .gift.wide .emoji { font-size: 44px; }
+  .gift.wide .gdesc { margin-bottom: 0; }
+  .gift.wide .buy { width: auto; }
+
   .note { color: var(--hint); font-size: 12px; text-align: center; padding: 0 8px; }
 
   .done {
@@ -128,8 +143,8 @@
       </div>
       <button class="buy" data-plan="week">⭐ <span class="price">99</span></button>
     </div>
-    <div class="plan best" data-plan="month">
-      <span class="tag">ВЫГОДНО</span>
+    <div class="plan" data-plan="month" id="month-plan">
+      <span class="tag" id="month-tag" hidden>ВЫГОДНО</span>
       <div class="info">
         <div class="name">Месяц</div>
         <div class="sub" id="month-sub">30 дней без ограничений</div>
@@ -145,13 +160,17 @@
     <li><span class="e">💖</span> Поддержка проекта и новые функции</li>
   </ul>
 
+  <h2>Подарки</h2>
+  <p class="gifts-intro" id="gifts-intro">Порадуй Аню — она обязательно ответит и будет помнить твой подарок</p>
+  <div class="gifts" id="gifts"></div>
+
   <p class="note">Оплата через Telegram Stars. Подписка не продлевается автоматически.<br>Вопросы по оплате — команда /paysupport в чате.</p>
 </div>
 
 <div class="done" id="done">
   <div class="big">💖</div>
-  <h3>Спасибо!</h3>
-  <p>Подписка активирована. Возвращайся в чат — Аня ждёт 😊</p>
+  <h3 id="done-title">Спасибо!</h3>
+  <p id="done-text">Подписка активирована. Возвращайся в чат — Аня ждёт 😊</p>
 </div>
 
 <script>
@@ -179,8 +198,38 @@
   }
   if (price.week && price.month) {
     const save = Math.round((1 - price.month / (price.week * 30 / 7)) * 100);
-    if (save > 0) $("#month-sub").textContent = `30 дней без ограничений · экономия ${save}%`;
+    if (save > 0) {
+      // «Выгодно» показываем, только если месяц правда дешевле недель
+      $("#month-sub").textContent = `30 дней без ограничений · экономия ${save}%`;
+      $("#month-plan").classList.add("best");
+      $("#month-tag").hidden = false;
+    }
   }
+
+  // Подарки: цены и ссылки на оплату передаёт бот, описания — здесь
+  const GIFTS = [
+    ["coffee", "☕", "Кофе", "Горячий капучино — пусть её утро начнётся с тебя"],
+    ["rose", "🌹", "Роза", "Одна красная роза — маленький, но приятный знак внимания"],
+    ["chocolate", "🍫", "Шоколадка", "Что-то сладкое для хорошего настроения"],
+    ["bouquet", "💐", "Букет", "Большой букет — она поставит его на самое видное место"],
+    ["teddy", "🧸", "Мишка", "Плюшевый мишка, которого она будет обнимать, когда скучает"],
+    ["ring", "💍", "Кольцо", "Колечко, которое она будет носить и вспоминать тебя"],
+    ["dress", "👗", "Платье", "Красивое платье, в котором она мечтает пойти на свидание с тобой"],
+  ];
+  const giftsBox = $("#gifts");
+  const shown = GIFTS.filter(([code]) => q.get(`g_${code}_link`) || !(tg && tg.initData));
+  shown.forEach(([code, emoji, gname, gdesc], i) => {
+    const p = q.get(`g_${code}_price`) || "?";
+    const el = document.createElement("div");
+    // последний подарок без пары растягиваем на всю ширину
+    el.className = "gift" + (i === shown.length - 1 && shown.length % 2 ? " wide" : "");
+    el.innerHTML = `<div class="emoji">${emoji}</div><div class="ginfo" style="flex:1;display:flex;flex-direction:column"><div class="gname"></div><div class="gdesc"></div></div><button class="buy" data-link="g_${code}_link" data-kind="gift" data-gift="${gname}">⭐ ${p}</button>`;
+    el.querySelector(".gname").textContent = gname;
+    el.querySelector(".gdesc").textContent = gdesc;
+    giftsBox.appendChild(el);
+  });
+  if (!shown.length) { $("#gifts-intro").hidden = true; }
+  $("#gifts-intro").textContent = `Порадуй ${name === "Аня" ? "Аню" : name} — она обязательно ответит и будет помнить твой подарок`;
 
   // Статус пользователя (если бот его передал)
   const status = $("#status");
@@ -198,12 +247,13 @@
     status.hidden = false;
   }
 
-  // Кнопки «Купить»
+  // Кнопки «Купить» (подписка и подарки)
   document.querySelectorAll(".buy").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const link = q.get(btn.dataset.plan + "_link");
+      const isGift = btn.dataset.kind === "gift";
+      const link = q.get(isGift ? btn.dataset.link : btn.dataset.plan + "_link");
       if (!tg || !tg.initData || !link) {
-        alert("Открой это меню из бота в Telegram, чтобы купить подписку.");
+        alert("Открой это меню из бота в Telegram, чтобы купить.");
         return;
       }
       tg.HapticFeedback && tg.HapticFeedback.impactOccurred("light");
@@ -212,6 +262,11 @@
         btn.disabled = false;
         if (result === "paid") {
           tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success");
+          if (isGift) {
+            $("#done .big").textContent = btn.closest(".gift").querySelector(".emoji").textContent;
+            $("#done-title").textContent = "Подарок отправлен!";
+            $("#done-text").textContent = `${name} уже пишет тебе в чат 💌`;
+          }
           $("#done").classList.add("show");
           setTimeout(() => tg.close(), 2500);
         } else if (result === "failed") {
